@@ -1,6 +1,6 @@
 # Security File Inspector
 
-
+![[App Welcome Page](assets/Securityfileinspector.png)]()
 
 ## Overview
 
