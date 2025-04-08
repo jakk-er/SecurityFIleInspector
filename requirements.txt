@@ -1,0 +1,5 @@
+python-magic
+trafilatura
+validators
+streamlit
+requests
