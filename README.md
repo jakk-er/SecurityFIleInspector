@@ -1,6 +1,6 @@
 # Security File Inspector
 
-![App Banner](https://your-banner-image-url-here)
+
 
 ## Overview
 
