@@ -434,18 +434,28 @@ if st.session_state.active_menu == "File Scanner":
         
         # Advanced options in expander
         with st.expander("Advanced Analysis Options"):
-            recursion_depth = st.slider(
-                "Maximum recursion depth", 
-                min_value=0, 
-                max_value=2, 
-                value=1,
-                help="Controls how deeply the tool will analyze nested files."
-            )
+            col1, col2 = st.columns(2)
             
-            # Add size and entropy configurations
-            with st.expander("Size and Entropy Thresholds"):
+            with col1:
+                recursion_depth = st.slider(
+                    "Maximum recursion depth", 
+                    min_value=0, 
+                    max_value=2, 
+                    value=0,
+                    help="Controls how deeply the tool will analyze nested files."
+                )
+                
+                show_debug_info = st.checkbox(
+                    "Show debug information", 
+                    value=False,
+                    help="Display additional technical information during analysis"
+                )
+
+            with col2:
+                st.subheader("Size and Entropy Thresholds")
+                
                 # Level 0 settings
-                st.subheader("Initial Scan (Level 0)")
+                st.markdown("**Initial Scan (Level 0)**")
                 min_size_0 = st.number_input(
                     "Minimum file size (KB)", 
                     min_value=1, 
@@ -472,7 +482,7 @@ if st.session_state.active_menu == "File Scanner":
                 )
 
                 # Level 1 settings
-                st.subheader("First Deep Scan (Level 1)")
+                st.markdown("**First Deep Scan (Level 1)**")
                 min_size_1 = st.number_input(
                     "Minimum file size (KB)", 
                     min_value=1, 
@@ -496,7 +506,7 @@ if st.session_state.active_menu == "File Scanner":
                 )
 
                 # Level 2 settings
-                st.subheader("Deepest Scan (Level 2)")
+                st.markdown("**Deepest Scan (Level 2)**")
                 min_size_2 = st.number_input(
                     "Minimum file size (KB)", 
                     min_value=1, 
@@ -518,12 +528,6 @@ if st.session_state.active_menu == "File Scanner":
                     value=6.5,  # Default
                     key="entropy_2"
                 )
-
-            show_debug_info = st.checkbox(
-                "Show debug information", 
-                value=False,
-                help="Display additional technical information during analysis"
-            )
         
         # Scan button
         if st.button("Start Scan", type="primary", use_container_width=True):
