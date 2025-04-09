@@ -270,7 +270,7 @@ def categorize_files(files):
 
 # Set page configuration
 st.set_page_config(
-    page_title="File Encoding & Malware Detector",
+    page_title="Security File Inspector",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="collapsed"  # Hide sidebar initially
@@ -372,7 +372,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-st.title("File Encoding & Malware Detector")
+st.title("Security File Inspector")
 
 # Main content
 if st.session_state.active_menu == "File Scanner":
@@ -951,7 +951,7 @@ if st.session_state.active_menu == "File Scanner":
 elif st.session_state.active_menu == "About":
     st.header("About This Tool")
     st.markdown("""
-    ### File Encoding & Malware Detector
+    ### Security File Inspector - File Encoding & Malware Detector
     
     This tool helps security professionals and curious users analyze files for:
     
@@ -1023,4 +1023,4 @@ elif st.session_state.active_menu == "Help":
 
 # Footer
 st.markdown("---")
-st.markdown("File Encoding & Malware Detector | Built with Streamlit")
+st.markdown("Security File Inspector | Built with Streamlit")
