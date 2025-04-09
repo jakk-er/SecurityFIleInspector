@@ -398,13 +398,6 @@ if st.session_state.active_menu == "File Scanner":
             st.rerun()
         st.caption("Enter a website URL")
         
-        st.markdown("<div style='margin: 8px 0;'></div>", unsafe_allow_html=True)
-        
-        if st.button("📋 Paste Text", use_container_width=True, key="btn_text"):
-            st.session_state.active_input = "text"
-            st.rerun()
-        st.caption("Paste encoded content")
-        
         # Add a separator
         st.markdown("---")
         
@@ -437,12 +430,6 @@ if st.session_state.active_menu == "File Scanner":
                         st.success("Valid URL entered")
                     else:
                         st.error("Please enter a valid URL")
-        
-        # Text paste section - only show when selected
-        elif st.session_state.active_input == "text":
-            text_input = st.text_area("Paste text or encoded content", height=150, key="text_input")
-            if text_input:
-                st.success(f"Text input received ({len(text_input)} characters)")
         
         # Advanced options in expander
         with st.expander("Advanced Analysis Options"):
@@ -536,82 +523,6 @@ if st.session_state.active_menu == "File Scanner":
                         else:
                             st.error("Failed to download content from URL")
                     
-                    elif text_input:
-                        # First, try to analyze using our enhanced file analyzer
-                        # This handles both encoded and raw content
-                        extracted_files = analyze_file(
-                            text_input.encode('utf-8', errors='ignore'), 
-                            "pasted_content",
-                            recursion_depth=0,
-                            max_recursion=recursion_depth
-                        )
-                        
-                        if extracted_files and len(extracted_files) > 1:  # First one is the original input
-                            # Files were detected by the analyzer
-                            st.session_state.extracted_files = extracted_files
-                        else:
-                            # Fallback: Direct detection and decoding
-                            encoding_type = detect_encoding(text_input)
-                            if encoding_type:
-                                try:
-                                    if st.session_state.show_debug:
-                                        st.info(f"Attempting direct decoding with detected encoding: {encoding_type}")
-                                    
-                                    decoded_content = decode_content(text_input, encoding_type)
-                                    file_type, extension = determine_file_type_extension(decoded_content)
-                                    
-                                    # Special handling for PDF files
-                                    if decoded_content.startswith(b'%PDF'):
-                                        file_type = "application/pdf"
-                                        extension = "pdf"
-                                    
-                                    # Debug information
-                                    if st.session_state.show_debug:
-                                        st.write(f"Debug - Decoded size: {len(decoded_content)} bytes")
-                                        st.write(f"Debug - Detected type: {file_type}")
-                                    
-                                    st.session_state.extracted_files = [
-                                        # Include the original input
-                                        {
-                                            "name": "original_input.txt",
-                                            "content": text_input.encode('utf-8', errors='ignore'),
-                                            "size": len(text_input),
-                                            "type": "text/plain",
-                                        },
-                                        # And the decoded content
-                                        {
-                                            "name": f"decoded_content.{extension}",
-                                            "content": decoded_content,
-                                            "size": len(decoded_content),
-                                            "type": file_type,
-                                            "encoding": encoding_type
-                                        }
-                                    ]
-                                except Exception as e:
-                                    if st.session_state.show_debug:
-                                        st.error(f"Error decoding content: {str(e)}")
-                                    else:
-                                        st.error("Failed to decode content. Try enabling debug mode for more details.")
-                                    # Fallback to treating as raw content
-                                    st.session_state.extracted_files = [
-                                        {
-                                            "name": "original_input.txt",
-                                            "content": text_input.encode('utf-8', errors='ignore'),
-                                            "size": len(text_input),
-                                            "type": "text/plain",
-                                        }
-                                    ]
-                            else:
-                                # Treat as raw content and just set the file
-                                st.session_state.extracted_files = [
-                                    {
-                                        "name": "original_input.txt",
-                                        "content": text_input.encode('utf-8', errors='ignore'),
-                                        "size": len(text_input),
-                                        "type": "text/plain",
-                                    }
-                                ]
-                    
                     else:
                         st.warning("Please provide input via one of the methods above")
                 
@@ -646,14 +557,9 @@ if st.session_state.active_menu == "File Scanner":
             # Filter out the original input file to avoid confusion in results display
             display_files = st.session_state.extracted_files.copy()
             
-            # Remove the original input file (uploaded file or pasted text)
-            if total_files > 1:
-                # Check if the first file is the original input
-                if display_files[0]['name'].startswith(('original_input', 'pasted_content')):
-                    display_files = display_files[1:]
-                # Also filter out uploaded files that match the input filename
-                elif uploaded_file is not None:
-                    display_files = [f for f in display_files if f['name'] != uploaded_file.name]
+            # Remove the original input file
+            if total_files > 1 and uploaded_file is not None:
+                display_files = [f for f in display_files if f['name'] != uploaded_file.name]
                 
                 filtered_total = len(display_files)
                 if filtered_total < total_files:
@@ -1053,7 +959,7 @@ elif st.session_state.active_menu == "About":
     
     ### Features
     
-    - Multiple input methods: file upload, URL, or pasted text
+    - Multiple input methods: file upload or URL
     - Support for various encoding formats including Base64, Hex, UTF-8, and more
     - Automatic file type detection
     - Integration with VirusTotal for malware scanning
@@ -1078,7 +984,6 @@ elif st.session_state.active_menu == "Help":
     
     1. **Upload File**: Click the "Browse files" button to select a file from your computer
     2. **Enter URL**: Paste a direct URL to a file you want to analyze
-    3. **Paste Text**: Copy and paste encoded or raw data directly into the text area
     
     #### Analysis Process
     
