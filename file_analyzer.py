@@ -162,7 +162,10 @@ def analyze_file(content, filename, recursion_depth=0, max_recursion=1, content_
     content_hashes.add(original_hash)
 
     # Add the original file to the list
-    file_type, extension = determine_file_type_extension(content)
+    result = determine_file_type_extension(content)
+    file_type = result[0]
+    extension = result[1] if len(result) > 1 else ''
+
 
     # If the determined extension doesn't match the original filename extension,
     # use the determined extension for a more accurate file type
@@ -204,7 +207,9 @@ def analyze_file(content, filename, recursion_depth=0, max_recursion=1, content_
                 try:
                     print(f"Detected encoding: {encoding_type}")
                     decoded_content = decode_content(content_str, encoding_type)
-                    decoded_type, decoded_ext = determine_file_type_extension(decoded_content)
+                    result = determine_file_type_extension(decoded_content)
+                    decoded_type = result[0]
+                    decoded_ext = result[1] if len(result) > 1 else 'bin'
 
                     # Add any decoded content that we can identify
                     # PDF files and binary data will have a meaningful type other than text/plain
@@ -296,7 +301,9 @@ def analyze_file(content, filename, recursion_depth=0, max_recursion=1, content_
 
                             try:
                                 decoded_content = base64.b64decode(clean_data)
-                                decoded_type, decoded_ext = determine_file_type_extension(decoded_content)
+                                result = determine_file_type_extension(decoded_content)
+                                decoded_type = result[0]
+                                decoded_ext = result[1] if len(result) > 1 else 'bin'
 
                                 # Check if it looks like a valid file - use the same validation as above
                                 valid_decoded = False
@@ -345,7 +352,9 @@ def analyze_file(content, filename, recursion_depth=0, max_recursion=1, content_
                 if hidden_content:
                     # Generate name and analyze extracted content
                     hidden_name = f"hidden_{encoding}_{len(detected_files)}"
-                    hidden_type, hidden_ext = determine_file_type_extension(hidden_content)
+                    result = determine_file_type_extension(hidden_content)
+                    hidden_type = result[0]
+                    hidden_ext = result[1] if len(result) > 1 else ''
                     if hidden_ext:
                         hidden_name += f".{hidden_ext}"
 
@@ -384,7 +393,9 @@ def extract_from_archive(content, file_type):
                 for file_info in zip_ref.infolist():
                     if file_info.file_size > 0 and not file_info.is_dir():
                         extracted_content = zip_ref.read(file_info.filename)
-                        extracted_type, extension = determine_file_type_extension(extracted_content)
+                        result = determine_file_type_extension(extracted_content)
+                        extracted_type = result[0]
+                        extension = result[1] if len(result) > 1 else ''
 
                         extracted_files.append({
                             "name": os.path.basename(file_info.filename),
@@ -404,7 +415,9 @@ def extract_from_archive(content, file_type):
                 for member in tar_ref.getmembers():
                     if member.isfile() and member.size > 0:
                         extracted_content = tar_ref.extractfile(member).read()
-                        extracted_type, extension = determine_file_type_extension(extracted_content)
+                        result = determine_file_type_extension(extracted_content)
+                        extracted_type = result[0]
+                        extension = result[1] if len(result) > 1 else ''
 
                         extracted_files.append({
                             "name": os.path.basename(member.name),
@@ -422,7 +435,9 @@ def extract_from_archive(content, file_type):
         try:
             with gzip.GzipFile(fileobj=BytesIO(content), mode="rb") as gz_ref:
                 extracted_content = gz_ref.read()
-                extracted_type, extension = determine_file_type_extension(extracted_content)
+                result = determine_file_type_extension(extracted_content)
+                extracted_type = result[0]
+                extension = result[1] if len(result) > 1 else ''
 
                 extracted_files.append({
                     "name": f"extracted.{extension}",
@@ -439,7 +454,9 @@ def extract_from_archive(content, file_type):
     elif file_type == "application/x-bzip2":
         try:
             extracted_content = bz2.decompress(content)
-            extracted_type, extension = determine_file_type_extension(extracted_content)
+            result = determine_file_type_extension(extracted_content)
+            extracted_type = result[0]
+            extension = result[1] if len(result) > 1 else ''
 
             extracted_files.append({
                 "name": f"extracted.{extension}",
@@ -456,7 +473,9 @@ def extract_from_archive(content, file_type):
     elif file_type == "application/x-xz":
         try:
             extracted_content = lzma.decompress(content)
-            extracted_type, extension = determine_file_type_extension(extracted_content)
+            result = determine_file_type_extension(extracted_content)
+            extracted_type = result[0]
+            extension = result[1] if len(result) > 1 else ''
 
             extracted_files.append({
                 "name": f"extracted.{extension}",
@@ -658,7 +677,7 @@ def extract_file_content(content, recursion_depth=0, max_recursion=1, content_ha
                 if extension == 'pdf' and file_content.startswith(b'%PDF-1.'):
                     # PDFs must have ALL these specific PDF structural elements to be considered valid
                     has_pages = b'/Pages' in file_content[:2000]
-                    has_endobj = b'endobj' in file_content[:5000]
+                    has_endobj = b'endobj' in file_content[:3000]
                     has_startxref = b'startxref' in file_content
                     has_trailer = b'trailer' in file_content or b'/Trailer' in file_content
                     has_eof = b'%%EOF' in file_content
@@ -752,15 +771,15 @@ def extract_file_content(content, recursion_depth=0, max_recursion=1, content_ha
 def find_hidden_markers(content):
     """
     Detect potential hidden content markers using advanced pattern matching and entropy analysis
-    
+
     Args:
         content (bytes): Content to analyze
-        
+
     Returns:
         list: List of tuples containing (position, encoding_type, metadata)
     """
     markers = []
-    
+
     try:
         if isinstance(content, bytes):
             content_str = content.decode('utf-8', errors='ignore')
@@ -774,7 +793,8 @@ def find_hidden_markers(content):
             try:
                 decoded = base64.b64decode(base64_str, validate=True)
                 if len(decoded) > 64:
-                    file_type, _ = determine_file_type_extension(decoded)
+                    result = determine_file_type_extension(decoded)
+                    file_type = result[0]
                     if file_type not in ['text/plain', 'application/octet-stream']:
                         markers.append((
                             match.start(),
@@ -790,11 +810,12 @@ def find_hidden_markers(content):
             hex_str = match.group().replace(" ", "")
             if len(hex_str) % 2 != 0:
                 continue
-            
+
             try:
                 decoded = bytes.fromhex(hex_str)
                 if len(decoded) > 16:
-                    file_type, _ = determine_file_type_extension(decoded)
+                    result = determine_file_type_extension(decoded)
+                    file_type = result[0]
                     markers.append((
                         match.start(),
                         "hex",
@@ -820,37 +841,37 @@ def find_hidden_markers(content):
 
     except Exception as e:
         print(f"Error in hidden marker detection: {str(e)}")
-    
+
     return markers
 
 def calculate_entropy(data):
     """Calculate Shannon entropy of a byte sequence"""
     if not data:
         return 0
-    
+
     entropy = 0
     counts = [0] * 256
     for byte in data:
         counts[byte] += 1
-    
+
     for count in counts:
         if count == 0:
             continue
         p = count / len(data)
         entropy -= p * math.log2(p)
-    
+
     return entropy
 
 def extract_hidden_content(content, pos, encoding, metadata=None):
     """
     Extract and validate hidden content with improved validation
-    
+
     Args:
         content (bytes): Original content
         pos (int): Position in content where hidden data starts
         encoding (str): Encoding type detected
         metadata (dict): Additional detection metadata
-        
+
     Returns:
         bytes: Extracted content if valid, None otherwise
     """
@@ -864,11 +885,11 @@ def extract_hidden_content(content, pos, encoding, metadata=None):
                     pos += 1
                 else:
                     break
-            
+
             missing_padding = len(base64_str) % 4
             if missing_padding:
                 base64_str += '=' * (4 - missing_padding)
-            
+
             decoded = base64.b64decode(base64_str, validate=True)
             return validate_extracted_content(decoded)
 
@@ -881,10 +902,10 @@ def extract_hidden_content(content, pos, encoding, metadata=None):
                     pos += 1
                 else:
                     break
-            
+
             if len(hex_str) % 2 != 0:
                 hex_str = hex_str[:-1]
-            
+
             decoded = bytes.fromhex(hex_str)
             return validate_extracted_content(decoded)
 
@@ -901,21 +922,22 @@ def extract_hidden_content(content, pos, encoding, metadata=None):
 def validate_extracted_content(data, min_size=128):
     """
     Validate extracted content through multiple checks
-    
+
     Args:
         data (bytes): Data to validate
         min_size (int): Minimum valid file size
-        
+
     Returns:
         bytes: Validated data or None
     """
     if len(data) < min_size:
         return None
-    
-    file_type, extension = determine_file_type_extension(data)
+
+    result = determine_file_type_extension(data)
+    file_type = result[0]
     if file_type == 'application/octet-stream':
         return None
-    
+
     if file_type == 'application/pdf':
         if not all([b'%PDF-' in data[:5],
                    b'/Pages' in data[:4096],
@@ -923,14 +945,14 @@ def validate_extracted_content(data, min_size=128):
                    b'startxref' in data,
                    b'%%EOF' in data[-1024:]]):
             return None
-    
+
     entropy = calculate_entropy(data[:4096])
     if entropy > 7.5 and file_type == 'application/octet-stream':
         return None
-    
+
     if file_type.startswith('text/'):
         printable = sum(b in string.printable.encode() for b in data)
         if printable / len(data) < 0.8:
             return None
-    
+
     return data
