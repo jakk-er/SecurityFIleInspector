@@ -14,6 +14,8 @@ import math
 import string
 from io import BytesIO
 from PIL import Image
+import urllib.parse
+import requests
 
 from encoding_detector import detect_encoding, decode_content
 from utils import determine_file_type_extension
@@ -131,205 +133,255 @@ def extract_base64_images_from_html(content):
     return results
 
 
-def analyze_file(content, filename, recursion_depth=0, max_recursion=1, content_hashes=None):
+def safe_process_content(content, filename=None):
     """
-    Analyze a file to detect hidden files and determine file types.
-
+    Safely process content by ensuring it's only read as raw data
+    
     Args:
-        content (bytes): The file content as bytes
-        filename (str): The filename
-        recursion_depth (int): Current recursion depth for nested analysis
-        max_recursion (int): Maximum allowed recursion depth to prevent deep nested analysis
-        content_hashes (set): Set to track content hashes
-
+        content (bytes): Raw content to analyze
+        filename (str, optional): Original filename
+    
     Returns:
-        list: List of detected files with metadata
+        bytes: Raw content for analysis
     """
-    detected_files = []
+    try:
+        # Use BytesIO to ensure content stays in memory and is never executed
+        buffer = io.BytesIO(content)
+        # Read raw bytes without any execution
+        raw_content = buffer.read()
+        return raw_content
+    except Exception as e:
+        print(f"Error in safe content processing: {str(e)}")
+        return None
 
-    # Safety check for recursion
-    if recursion_depth > max_recursion:
-        print(f"Maximum recursion depth reached ({max_recursion}), stopping further analysis")
-        return detected_files
+def sanitize_url(url):
+    """
+    Sanitize and validate URL to prevent script injection
+    
+    Args:
+        url (str): URL to validate
+    
+    Returns:
+        tuple: (is_safe, message)
+    """
+    try:
+        # Ensure URL is string
+        if not isinstance(url, str):
+            return False, "Invalid URL format"
 
-    # Initialize or use provided content hashes
-    if content_hashes is None:
-        content_hashes = set()
+        # Basic URL structure validation
+        parsed = urllib.parse.urlparse(url)
+        
+        # Only allow HTTP/HTTPS
+        if parsed.scheme not in ('http', 'https'):
+            return False, "Only HTTP/HTTPS URLs are allowed"
 
-    # Add the original file hash and skip if already seen
-    original_hash = generate_file_hash(content)['md5']
-    if original_hash in content_hashes:
-        return []
-    content_hashes.add(original_hash)
+        # Check for script injection in URL
+        dangerous_patterns = [
+            'javascript:', 'data:', 'vbscript:',
+            '<script', '<!--', '-->', '<img',
+            'onerror=', 'onload=', 'eval(',
+            'document.', 'window.'
+        ]
+        
+        url_lower = url.lower()
+        if any(pattern in url_lower for pattern in dangerous_patterns):
+            return False, "URL contains potentially dangerous content"
 
-    # Add the original file to the list
-    result = determine_file_type_extension(content)
-    file_type = result[0]
-    extension = result[1] if len(result) > 1 else ''
+        return True, "URL validation passed"
+
+    except Exception as e:
+        return False, f"URL validation error: {str(e)}"
+
+def safe_url_fetch(url):
+    """
+    Safely fetch URL content as raw data
+    
+    Args:
+        url (str): Validated URL to fetch
+    
+    Returns:
+        tuple: (content, error_message)
+    """
+    try:
+        # Validate URL first
+        is_safe, message = sanitize_url(url)
+        if not is_safe:
+            return None, message
+
+        # Fetch content with safety measures
+        response = requests.get(
+            url,
+            timeout=30,
+            stream=True,
+            headers={'User-Agent': 'SecurityFileInspector/1.0'},
+            verify=True  # Verify SSL certificates
+        )
+        
+        # Stream content to memory buffer
+        content = io.BytesIO()
+        for chunk in response.iter_content(chunk_size=8192):
+            content.write(chunk)
+        
+        return content.getvalue(), None
+
+    except Exception as e:
+        return None, f"Error fetching URL: {str(e)}"
+
+def analyze_file(content, filename, recursion_depth=0, max_recursion=1, content_hashes=None, thresholds=None):
+    """
+    Analyze file content safely as raw data only
+    """
+    try:
+        # Process content safely
+        raw_content = safe_process_content(content, filename)
+        if raw_content is None:
+            return []
+
+        # If no thresholds provided, use defaults
+        if thresholds is None:
+            thresholds = {
+                0: {
+                    "min_size": 1024,  # 1KB
+                    "max_size": 200 * 1024 * 1024,  # 200MB
+                    "entropy": 7.5
+                },
+                1: {
+                    "min_size": 4096,  # 4KB
+                    "max_size": 100 * 1024 * 1024,  # 100MB
+                    "entropy": 7.0
+                },
+                2: {
+                    "min_size": 8192,  # 8KB
+                    "max_size": 50 * 1024 * 1024,  # 50MB
+                    "entropy": 6.5
+                }
+            }
+
+        detected_files = []
+
+        # Safety check for recursion
+        if recursion_depth > max_recursion:
+            print(f"Maximum recursion depth reached ({max_recursion}), stopping further analysis")
+            return detected_files
+
+        # Initialize or use provided content hashes
+        if content_hashes is None:
+            content_hashes = set()
+
+        # Add the original file hash and skip if already seen
+        original_hash = generate_file_hash(raw_content)['md5']
+        if original_hash in content_hashes:
+            return []
+        content_hashes.add(original_hash)
+
+        # Add the original file to the list
+        result = determine_file_type_extension(raw_content)
+        file_type = result[0]
+        extension = result[1] if len(result) > 1 else ''
 
 
-    # If the determined extension doesn't match the original filename extension,
-    # use the determined extension for a more accurate file type
-    original_extension = os.path.splitext(filename)[1][1:] if '.' in filename else ''
-    if not original_extension or original_extension.lower() != extension.lower():
-        if extension:
-            filename = os.path.splitext(filename)[0] + '.' + extension
+        # If the determined extension doesn't match the original filename extension,
+        # use the determined extension for a more accurate file type
+        original_extension = os.path.splitext(filename)[1][1:] if '.' in filename else ''
+        if not original_extension or original_extension.lower() != extension.lower():
+            if extension:
+                filename = os.path.splitext(filename)[0] + '.' + extension
 
-    detected_files.append({
-        "name": filename,
-        "content": content,
-        "size": len(content),
-        "type": file_type,
-        "content_hash": original_hash,
-        "extension": extension
-    })
+        detected_files.append({
+            "name": filename,
+            "content": raw_content,
+            "size": len(raw_content),
+            "type": file_type,
+            "content_hash": original_hash,
+            "extension": extension
+        })
 
-    # Special handling for HTML files - look for embedded Base64 images
-    if file_type == 'text/html' and recursion_depth == 0:
-        base64_images = extract_base64_images_from_html(content)
-        if base64_images:
-            detected_files.extend(base64_images)
+        # Special handling for HTML files - look for embedded Base64 images
+        if file_type == 'text/html' and recursion_depth == 0:
+            base64_images = extract_base64_images_from_html(raw_content)
+            if base64_images:
+                detected_files.extend(base64_images)
 
-    # Only explore nested content if we haven't reached max depth
-    if recursion_depth < max_recursion:
-        # Check for archive files and extract contents
-        extracted = extract_from_archive(content, file_type)
-        if extracted:
-            detected_files.extend(extracted)
+        # Only explore nested content if we haven't reached max depth
+        if recursion_depth < max_recursion:
+            # Check for archive files and extract contents
+            extracted = extract_from_archive(raw_content, file_type)
+            if extracted:
+                detected_files.extend(extracted)
 
-        # Check for encoded content
-        try:
-            if isinstance(content, bytes):
-                content_str = content.decode('utf-8', errors='ignore')
-            else:
-                content_str = content
+            # Check for encoded content
+            try:
+                if isinstance(raw_content, bytes):
+                    content_str = raw_content.decode('utf-8', errors='ignore')
+                else:
+                    content_str = raw_content
 
-            encoding_type = detect_encoding(content_str)
-            if encoding_type:
-                try:
-                    print(f"Detected encoding: {encoding_type}")
-                    decoded_content = decode_content(content_str, encoding_type)
-                    result = determine_file_type_extension(decoded_content)
-                    decoded_type = result[0]
-                    decoded_ext = result[1] if len(result) > 1 else 'bin'
-
-                    # Add any decoded content that we can identify
-                    # PDF files and binary data will have a meaningful type other than text/plain
-                    # Also check file size to ensure it's not just a tiny fragment
-                    if len(decoded_content) > 500:  # Increased minimum size to avoid tiny fragments
-                        # Check for valid file signatures in decoded content to filter out garbage
-                        valid_decoded = False
-
-                        # For PDFs - use robust validation
-                        if decoded_content.startswith(b'%PDF'):
-                            # Enhanced validation with multiple PDF markers
-                            has_pages = b'/Pages' in decoded_content[:2000]
-                            has_endobj = b'endobj' in decoded_content[:5000]
-                            has_startxref = b'startxref' in decoded_content
-                            has_trailer = b'trailer' in decoded_content or b'/Trailer' in decoded_content
-                            has_eof = b'%%EOF' in decoded_content
-
-                            # Only consider valid if all required PDF structure markers are present
-                            if has_pages and has_endobj and has_startxref and has_trailer and has_eof:
-                                valid_decoded = True
-                                decoded_type = "application/pdf"
-                                decoded_ext = "pdf"
-                                print("Detected PDF with valid structure")
-                            else:
-                                print("Rejected PDF with incomplete structure")
-
-                        # For ZIP files
-                        elif decoded_content.startswith(b'PK\x03\x04'):
-                            if b'PK\x01\x02' in decoded_content[:8192]:  # Central directory header
-                                valid_decoded = True
-
-                        # For images                        
-                        elif (decoded_content.startswith(b'\xFF\xD8\xFF') or  # JPEG
-                              decoded_content.startswith(b'\x89PNG\r\n\x1A\n') or  # PNG
-                              decoded_content.startswith((b'GIF87a', b'GIF89a'))):  # GIF
-                            valid_decoded = True
-
-                        # For other common formats with a content type assigned
-                        elif decoded_type and decoded_type not in ('text/plain', 'application/octet-stream'):
-                            valid_decoded = True
-
-                        # For text-like content, validate it has reasonable character distribution
-                        elif decoded_type == 'text/plain':
-                            try:
-                                text = decoded_content.decode('utf-8', errors='strict')
-                                # Only accept if it has a reasonable amount of text characters
-                                if re.search(r'[a-zA-Z0-9.,;:!?()}{"\' ]{20,}', text):
-                                    valid_decoded = True
-                            except:
-                                # Not valid UTF-8 text
-                                pass
-
-                        if valid_decoded:
-                            # Compare hash before adding
-                            decoded_hash = generate_file_hash(decoded_content)['md5']
-                            if decoded_hash not in content_hashes:
-                                content_hashes.add(decoded_hash)
-                                detected_files.append({
-                                    "name": f"decoded_{os.path.splitext(filename)[0]}.{decoded_ext}",
-                                    "content": decoded_content,
-                                    "size": len(decoded_content),
-                                    "type": decoded_type,
-                                    "encoding": encoding_type
-                                })
-
-                            # Recursively check decoded content for nested files, but only if we're not at max depth
-                            if recursion_depth + 1 <= max_recursion:
-                                # Use extract_file_content directly instead of a recursive analyze_file call 
-                                # to avoid double-analysis of the same content
-                                nested_files = extract_file_content(
-                                    decoded_content,
-                                    recursion_depth + 1,
-                                    max_recursion,
-                                    content_hashes=content_hashes
-                                )
-                                if nested_files:
-                                    detected_files.extend(nested_files)
-                except Exception as e:
-                    # If decoding fails, log and continue with other checks
-                    print(f"Error decoding content: {str(e)}")
-
-                    # Try special handling for files where normal decoding fails
+                encoding_type = detect_encoding(content_str)
+                if encoding_type:
                     try:
-                        # For base64, try a more aggressive approach by ignoring non-base64 chars
-                        if encoding_type == "base64":
-                            clean_data = re.sub(r'[^A-Za-z0-9+/=]', '', content_str)
-                            if len(clean_data) % 4 != 0:
-                                clean_data += '=' * (4 - len(clean_data) % 4)
+                        print(f"Detected encoding: {encoding_type}")
+                        decoded_content = decode_content(content_str, encoding_type)
+                        result = determine_file_type_extension(decoded_content)
+                        decoded_type = result[0]
+                        decoded_ext = result[1] if len(result) > 1 else 'bin'
 
-                            try:
-                                decoded_content = base64.b64decode(clean_data)
-                                result = determine_file_type_extension(decoded_content)
-                                decoded_type = result[0]
-                                decoded_ext = result[1] if len(result) > 1 else 'bin'
+                        # Add any decoded content that we can identify
+                        # PDF files and binary data will have a meaningful type other than text/plain
+                        # Also check file size to ensure it's not just a tiny fragment
+                        if len(decoded_content) > 500:  # Increased minimum size to avoid tiny fragments
+                            # Check for valid file signatures in decoded content to filter out garbage
+                            valid_decoded = False
 
-                                # Check if it looks like a valid file - use the same validation as above
-                                valid_decoded = False
+                            # For PDFs - use robust validation
+                            if decoded_content.startswith(b'%PDF'):
+                                # Enhanced validation with multiple PDF markers
+                                has_pages = b'/Pages' in decoded_content[:2000]
+                                has_endobj = b'endobj' in decoded_content[:5000]
+                                has_startxref = b'startxref' in decoded_content
+                                has_trailer = b'trailer' in decoded_content or b'/Trailer' in decoded_content
+                                has_eof = b'%%EOF' in decoded_content
 
-                                if decoded_content.startswith(b'%PDF'):
-                                    # Apply the same robust PDF validation as above
-                                    has_pages = b'/Pages' in decoded_content[:2000]
-                                    has_endobj = b'endobj' in decoded_content[:5000]
-                                    has_startxref = b'startxref' in decoded_content
-                                    has_trailer = b'trailer' in decoded_content or b'/Trailer' in decoded_content
-                                    has_eof = b'%%EOF' in decoded_content
+                                # Only consider valid if all required PDF structure markers are present
+                                if has_pages and has_endobj and has_startxref and has_trailer and has_eof:
+                                    valid_decoded = True
+                                    decoded_type = "application/pdf"
+                                    decoded_ext = "pdf"
+                                    print("Detected PDF with valid structure")
+                                else:
+                                    print("Rejected PDF with incomplete structure")
 
-                                    # Only consider valid if all required markers are present
-                                    if has_pages and has_endobj and has_startxref and has_trailer and has_eof:
-                                        valid_decoded = True
-                                        decoded_type = "application/pdf" 
-                                        decoded_ext = "pdf"
-                                        print("Detected PDF with valid structure in special handling")
-                                    else:
-                                        print("Rejected PDF with incomplete structure in special handling")
-                                elif decoded_type and decoded_type not in ('text/plain', 'application/octet-stream'):
+                            # For ZIP files
+                            elif decoded_content.startswith(b'PK\x03\x04'):
+                                if b'PK\x01\x02' in decoded_content[:8192]:  # Central directory header
                                     valid_decoded = True
 
-                                if valid_decoded and len(decoded_content) > 500:
+                            # For images                        
+                            elif (decoded_content.startswith(b'\xFF\xD8\xFF') or  # JPEG
+                                  decoded_content.startswith(b'\x89PNG\r\n\x1A\n') or  # PNG
+                                  decoded_content.startswith((b'GIF87a', b'GIF89a'))):  # GIF
+                                valid_decoded = True
+
+                            # For other common formats with a content type assigned
+                            elif decoded_type and decoded_type not in ('text/plain', 'application/octet-stream'):
+                                valid_decoded = True
+
+                            # For text-like content, validate it has reasonable character distribution
+                            elif decoded_type == 'text/plain':
+                                try:
+                                    text = decoded_content.decode('utf-8', errors='strict')
+                                    # Only accept if it has a reasonable amount of text characters
+                                    if re.search(r'[a-zA-Z0-9.,;:!?()}{"\' ]{20,}', text):
+                                        valid_decoded = True
+                                except:
+                                    # Not valid UTF-8 text
+                                    pass
+
+                            if valid_decoded:
+                                # Compare hash before adding
+                                decoded_hash = generate_file_hash(decoded_content)['md5']
+                                if decoded_hash not in content_hashes:
+                                    content_hashes.add(decoded_hash)
                                     detected_files.append({
                                         "name": f"decoded_{os.path.splitext(filename)[0]}.{decoded_ext}",
                                         "content": decoded_content,
@@ -337,43 +389,109 @@ def analyze_file(content, filename, recursion_depth=0, max_recursion=1, content_
                                         "type": decoded_type,
                                         "encoding": encoding_type
                                     })
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-        except Exception as e:
-            # If any error occurs during encoding detection, log and continue with other checks
-            print(f"Error during encoding detection: {str(e)}")
 
-        # Look for embedded files and hidden content at recursion level 0
-        if recursion_depth == 0:
-            # Check for known hidden content markers
-            hidden_markers = find_hidden_markers(content)
-            for pos, encoding in hidden_markers:
-                hidden_content = extract_hidden_content(content, pos, encoding)
-                if hidden_content:
-                    # Generate name and analyze extracted content
-                    hidden_name = f"hidden_{encoding}_{len(detected_files)}"
-                    result = determine_file_type_extension(hidden_content)
-                    hidden_type = result[0]
-                    hidden_ext = result[1] if len(result) > 1 else ''
-                    if hidden_ext:
-                        hidden_name += f".{hidden_ext}"
+                                # Recursively check decoded content for nested files, but only if we're not at max depth
+                                if recursion_depth + 1 <= max_recursion:
+                                    # Use extract_file_content directly instead of a recursive analyze_file call 
+                                    # to avoid double-analysis of the same content
+                                    nested_files = extract_file_content(
+                                        decoded_content,
+                                        recursion_depth + 1,
+                                        max_recursion,
+                                        content_hashes=content_hashes,
+                                        thresholds=thresholds
+                                    )
+                                    if nested_files:
+                                        detected_files.extend(nested_files)
+                    except Exception as e:
+                        # If decoding fails, log and continue with other checks
+                        print(f"Error decoding content: {str(e)}")
 
-                    detected_files.append({
-                        "name": hidden_name,
-                        "content": hidden_content,
-                        "size": len(hidden_content),
-                        "type": hidden_type,
-                        "source": f"hidden_{encoding}"
-                    })
+                        # Try special handling for files where normal decoding fails
+                        try:
+                            # For base64, try a more aggressive approach by ignoring non-base64 chars
+                            if encoding_type == "base64":
+                                clean_data = re.sub(r'[^A-Za-z0-9+/=]', '', content_str)
+                                if len(clean_data) % 4 != 0:
+                                    clean_data += '=' * (4 - len(clean_data) % 4)
 
-            # Look for traditionally embedded files
-            embedded_files = extract_file_content(content, recursion_depth, max_recursion, content_hashes)
-            if embedded_files:
-                detected_files.extend(embedded_files)
+                                try:
+                                    decoded_content = base64.b64decode(clean_data)
+                                    result = determine_file_type_extension(decoded_content)
+                                    decoded_type = result[0]
+                                    decoded_ext = result[1] if len(result) > 1 else 'bin'
 
-    return detected_files
+                                    # Check if it looks like a valid file - use the same validation as above
+                                    valid_decoded = False
+
+                                    if decoded_content.startswith(b'%PDF'):
+                                        # Apply the same robust PDF validation as above
+                                        has_pages = b'/Pages' in decoded_content[:2000]
+                                        has_endobj = b'endobj' in decoded_content[:5000]
+                                        has_startxref = b'startxref' in decoded_content
+                                        has_trailer = b'trailer' in decoded_content or b'/Trailer' in decoded_content
+                                        has_eof = b'%%EOF' in decoded_content
+
+                                        # Only consider valid if all required markers are present
+                                        if has_pages and has_endobj and has_startxref and has_trailer and has_eof:
+                                            valid_decoded = True
+                                            decoded_type = "application/pdf" 
+                                            decoded_ext = "pdf"
+                                            print("Detected PDF with valid structure in special handling")
+                                        else:
+                                            print("Rejected PDF with incomplete structure in special handling")
+                                    elif decoded_type and decoded_type not in ('text/plain', 'application/octet-stream'):
+                                        valid_decoded = True
+
+                                    if valid_decoded and len(decoded_content) > 500:
+                                        detected_files.append({
+                                            "name": f"decoded_{os.path.splitext(filename)[0]}.{decoded_ext}",
+                                            "content": decoded_content,
+                                            "size": len(decoded_content),
+                                            "type": decoded_type,
+                                            "encoding": encoding_type
+                                        })
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+            except Exception as e:
+                # If any error occurs during encoding detection, log and continue with other checks
+                print(f"Error during encoding detection: {str(e)}")
+
+            # Look for embedded files and hidden content at recursion level 0
+            if recursion_depth == 0:
+                # Check for known hidden content markers
+                hidden_markers = find_hidden_markers(raw_content)
+                for pos, encoding in hidden_markers:
+                    hidden_content = extract_hidden_content(raw_content, pos, encoding)
+                    if hidden_content:
+                        # Generate name and analyze extracted content
+                        hidden_name = f"hidden_{encoding}_{len(detected_files)}"
+                        result = determine_file_type_extension(hidden_content)
+                        hidden_type = result[0]
+                        hidden_ext = result[1] if len(result) > 1 else ''
+                        if hidden_ext:
+                            hidden_name += f".{hidden_ext}"
+
+                        detected_files.append({
+                            "name": hidden_name,
+                            "content": hidden_content,
+                            "size": len(hidden_content),
+                            "type": hidden_type,
+                            "source": f"hidden_{encoding}"
+                        })
+
+                # Look for traditionally embedded files
+                embedded_files = extract_file_content(raw_content, recursion_depth, max_recursion, content_hashes, thresholds)
+                if embedded_files:
+                    detected_files.extend(embedded_files)
+
+        return detected_files
+
+    except Exception as e:
+        print(f"Error in file analysis: {str(e)}")
+        return []
 
 def extract_from_archive(content, file_type):
     """
@@ -589,7 +707,7 @@ def validate_image_content(content, extension):
         print(f"Error validating image: {str(e)}")
         return False
 
-def extract_file_content(content, recursion_depth=0, max_recursion=1, content_hashes=None):
+def extract_file_content(content, recursion_depth=0, max_recursion=1, content_hashes=None, thresholds=None):
     """
     Extract embedded files from content by looking for file signatures
 
@@ -598,6 +716,7 @@ def extract_file_content(content, recursion_depth=0, max_recursion=1, content_ha
         recursion_depth (int): Current recursion depth for nested analysis
         max_recursion (int): Maximum allowed recursion depth to prevent deep nested analysis
         content_hashes (set): Set to track content hashes
+        thresholds (dict): Configuration for size and entropy thresholds per level
 
     Returns:
         list: Detected embedded files
@@ -1141,3 +1260,4 @@ def validate_extracted_content(data, min_size=128):
             return None
 
     return data
+
