@@ -883,33 +883,68 @@ def calculate_entropy(data):
 def extract_hidden_content(content, pos, encoding, metadata=None):
     """
     Extract and validate hidden content with improved validation
-
+    
     Args:
         content (bytes): Original content
         pos (int): Position in content where hidden data starts
         encoding (str): Encoding type detected
         metadata (dict): Additional detection metadata
-
+        
     Returns:
         bytes: Extracted content if valid, None otherwise
     """
     try:
         if encoding == "base64":
-            base64_str = ""
-            while pos < len(content):
-                char = chr(content[pos])
-                if char in string.ascii_letters + string.digits + '+/=':
-                    base64_str += char
-                    pos += 1
-                else:
-                    break
+            # Method 1: Custom marker-based extraction
+            if pos + 8 <= len(content) and content[pos:pos+8] == b'\x00BASE64\x00':
+                try:
+                    # Extract length from the 4 bytes after marker
+                    length = int.from_bytes(content[pos+8:pos+12], 'big')
+                    
+                    # Validate length is reasonable (increased to handle larger files)
+                    if 0 < length <= 500 * 1024 * 1024:  # 500MB limit
+                        # Extract the exact base64 content
+                        base64_content = content[pos+12:pos+12+length]
+                        if len(base64_content) == length:
+                            try:
+                                decoded = base64.b64decode(base64_content)
+                                return decoded
+                            except Exception as e:
+                                print(f"Error decoding marked base64 content: {str(e)}")
+                except Exception as e:
+                    print(f"Error processing custom BASE64 marker: {str(e)}")
+            
+            # Method 2: Standard base64 pattern detection
+            else:
+                try:
+                    # Look for base64 content starting at pos
+                    base64_str = ""
+                    while pos < len(content):
+                        char = chr(content[pos])
+                        if char in string.ascii_letters + string.digits + '+/=':
+                            base64_str += char
+                            pos += 1
+                        else:
+                            break
 
-            missing_padding = len(base64_str) % 4
-            if missing_padding:
-                base64_str += '=' * (4 - missing_padding)
+                    # Add padding if needed
+                    missing_padding = len(base64_str) % 4
+                    if missing_padding:
+                        base64_str += '=' * (4 - missing_padding)
 
-            decoded = base64.b64decode(base64_str, validate=True)
-            return validate_extracted_content(decoded)
+                    # Only try to decode if we have enough data
+                    if len(base64_str) >= 24:  # Minimum reasonable base64 length
+                        try:
+                            decoded = base64.b64decode(base64_str, validate=True)
+                            # Validate decoded content
+                            if len(decoded) > 500:  # Minimum size threshold
+                                result = determine_file_type_extension(decoded)
+                                if result[0] not in ('application/octet-stream', 'text/plain'):
+                                    return decoded
+                        except Exception:
+                            pass
+                except Exception as e:
+                    print(f"Error processing standard base64 content: {str(e)}")
 
         elif encoding == "hex":
             hex_str = ""
