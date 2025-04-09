@@ -937,7 +937,7 @@ def find_hidden_markers(content):
 
             try:
                 decoded = bytes.fromhex(hex_str)
-                if len(decoded) > 16:
+                if len(decoded) >= 16:
                     result = determine_file_type_extension(decoded)
                     file_type = result[0]
                     markers.append((match.start(), "hex"))
@@ -1057,8 +1057,21 @@ def extract_hidden_content(content, pos, encoding, metadata=None):
             if len(hex_str) % 2 != 0:
                 hex_str = hex_str[:-1]
 
-            decoded = bytes.fromhex(hex_str)
-            return validate_extracted_content(decoded)
+            try:
+                decoded = bytes.fromhex(hex_str)
+                if len(decoded) >= 16:
+                    # Calculate entropy
+                    sample = decoded[:4096]
+                    entropy = calculate_entropy(sample)
+            
+                    # Check entropy is in valid range
+                    if 4.5 <= entropy <= 7.5:
+                        result = determine_file_type_extension(decoded)
+                        if result[0] not in ['application/octet-stream', 'text/plain']:
+                            return validate_extracted_content(decoded)
+            except ValueError:
+                pass
+            return None
 
         elif encoding == "suspicious_js":
             start = max(0, pos - 50)
