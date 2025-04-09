@@ -10,6 +10,8 @@ import tarfile
 import gzip
 import bz2
 import lzma
+import math
+import string
 from io import BytesIO
 
 from encoding_detector import detect_encoding, decode_content
@@ -748,34 +750,187 @@ def extract_file_content(content, recursion_depth=0, max_recursion=1, content_ha
     return embedded_files
 
 def find_hidden_markers(content):
-    # Placeholder: Replace with actual hidden content detection logic
-    # This should check for various markers like specific byte sequences,
-    # file signatures, or other indicators of hidden content.
+    """
+    Detect potential hidden content markers using advanced pattern matching and entropy analysis
+    
+    Args:
+        content (bytes): Content to analyze
+        
+    Returns:
+        list: List of tuples containing (position, encoding_type, metadata)
+    """
     markers = []
-    # Simulate finding a base64 encoded marker at offset 100
-    markers.append((100, "base64"))
-    # Simulate finding an XOR encoded marker at offset 200 with key 10
-    markers.append((200, "xor_10"))
+    
+    try:
+        if isinstance(content, bytes):
+            content_str = content.decode('utf-8', errors='ignore')
+        else:
+            content_str = str(content)
+
+        # 1. Detect Base64 encoded content with validation
+        base64_pattern = r"(?:[A-Za-z0-9+/]{4,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?)"
+        for match in re.finditer(base64_pattern, content_str):
+            base64_str = match.group()
+            try:
+                decoded = base64.b64decode(base64_str, validate=True)
+                if len(decoded) > 64:
+                    file_type, _ = determine_file_type_extension(decoded)
+                    if file_type not in ['text/plain', 'application/octet-stream']:
+                        markers.append((
+                            match.start(),
+                            "base64",
+                            {"decoded_size": len(decoded), "type": file_type}
+                        ))
+            except (binascii.Error, ValueError):
+                continue
+
+        # 2. Detect hex-encoded content with validation
+        hex_pattern = r"(?:[0-9a-fA-F]{2}\s*){8,}"
+        for match in re.finditer(hex_pattern, content_str):
+            hex_str = match.group().replace(" ", "")
+            if len(hex_str) % 2 != 0:
+                continue
+            
+            try:
+                decoded = bytes.fromhex(hex_str)
+                if len(decoded) > 16:
+                    file_type, _ = determine_file_type_extension(decoded)
+                    markers.append((
+                        match.start(),
+                        "hex",
+                        {"decoded_size": len(decoded), "type": file_type}
+                    ))
+            except ValueError:
+                continue
+
+        # 3. Detect suspicious patterns
+        suspicious_js_patterns = [
+            r"eval\(.*?\)",
+            r"document\.write\(.*?\)",
+            r"(?:fromCharCode|createElement|appendChild)\(.*?\)",
+            r"\\x[0-9a-fA-F]{2}"
+        ]
+        for pattern in suspicious_js_patterns:
+            for match in re.finditer(pattern, content_str):
+                markers.append((
+                    match.start(),
+                    "suspicious_js",
+                    {"pattern": pattern, "match": match.group()[:20]}
+                ))
+
+    except Exception as e:
+        print(f"Error in hidden marker detection: {str(e)}")
+    
     return markers
 
-def extract_hidden_content(content, pos, encoding):
-    # Placeholder: Replace with actual hidden content extraction logic
-    # This should handle different encoding methods like base64, XOR, LSB steganography, etc.
-    if encoding == "base64":
-        try:
-            # Simulate extracting base64 content
-            base64_data = content[pos:pos + 100]  # Extract 100 bytes for demonstration
-            return base64.b64decode(base64_data)
-        except:
-            return None
-    elif encoding.startswith("xor_"):
-        try:
-            # Simulate extracting XOR encoded content
-            key = int(encoding.split("_")[1])
-            xor_data = content[pos:pos + 100]  # Extract 100 bytes for demonstration
-            decoded_data = bytes([b ^ key for b in xor_data])
-            return decoded_data
-        except:
-            return None
-    else:
+def calculate_entropy(data):
+    """Calculate Shannon entropy of a byte sequence"""
+    if not data:
+        return 0
+    
+    entropy = 0
+    counts = [0] * 256
+    for byte in data:
+        counts[byte] += 1
+    
+    for count in counts:
+        if count == 0:
+            continue
+        p = count / len(data)
+        entropy -= p * math.log2(p)
+    
+    return entropy
+
+def extract_hidden_content(content, pos, encoding, metadata=None):
+    """
+    Extract and validate hidden content with improved validation
+    
+    Args:
+        content (bytes): Original content
+        pos (int): Position in content where hidden data starts
+        encoding (str): Encoding type detected
+        metadata (dict): Additional detection metadata
+        
+    Returns:
+        bytes: Extracted content if valid, None otherwise
+    """
+    try:
+        if encoding == "base64":
+            base64_str = ""
+            while pos < len(content):
+                char = chr(content[pos])
+                if char in string.ascii_letters + string.digits + '+/=':
+                    base64_str += char
+                    pos += 1
+                else:
+                    break
+            
+            missing_padding = len(base64_str) % 4
+            if missing_padding:
+                base64_str += '=' * (4 - missing_padding)
+            
+            decoded = base64.b64decode(base64_str, validate=True)
+            return validate_extracted_content(decoded)
+
+        elif encoding == "hex":
+            hex_str = ""
+            while pos < len(content):
+                char = chr(content[pos]).lower()
+                if char in string.hexdigits:
+                    hex_str += char
+                    pos += 1
+                else:
+                    break
+            
+            if len(hex_str) % 2 != 0:
+                hex_str = hex_str[:-1]
+            
+            decoded = bytes.fromhex(hex_str)
+            return validate_extracted_content(decoded)
+
+        elif encoding == "suspicious_js":
+            start = max(0, pos - 50)
+            end = min(len(content), pos + 150)
+            return content[start:end]
+
         return None
+    except Exception as e:
+        print(f"Error extracting {encoding} content: {str(e)}")
+        return None
+
+def validate_extracted_content(data, min_size=128):
+    """
+    Validate extracted content through multiple checks
+    
+    Args:
+        data (bytes): Data to validate
+        min_size (int): Minimum valid file size
+        
+    Returns:
+        bytes: Validated data or None
+    """
+    if len(data) < min_size:
+        return None
+    
+    file_type, extension = determine_file_type_extension(data)
+    if file_type == 'application/octet-stream':
+        return None
+    
+    if file_type == 'application/pdf':
+        if not all([b'%PDF-' in data[:5],
+                   b'/Pages' in data[:4096],
+                   b'endobj' in data,
+                   b'startxref' in data,
+                   b'%%EOF' in data[-1024:]]):
+            return None
+    
+    entropy = calculate_entropy(data[:4096])
+    if entropy > 7.5 and file_type == 'application/octet-stream':
+        return None
+    
+    if file_type.startswith('text/'):
+        printable = sum(b in string.printable.encode() for b in data)
+        if printable / len(data) < 0.8:
+            return None
+    
+    return data
