@@ -13,6 +13,7 @@ import lzma
 import math
 import string
 from io import BytesIO
+from PIL import Image
 
 from encoding_detector import detect_encoding, decode_content
 from utils import determine_file_type_extension
@@ -490,6 +491,103 @@ def extract_from_archive(content, file_type):
             pass
 
     return extracted_files
+
+def validate_image_content(content, extension):
+    """
+    Strictly validate image content to reduce false positives
+    
+    Args:
+        content (bytes): Image content to validate
+        extension (str): Expected image extension
+        
+    Returns:
+        bool: True if valid image, False otherwise
+    """
+    try:
+        if extension == 'jpg' or extension == 'jpeg':
+            # JPEG validation
+            if not content.startswith(b'\xFF\xD8\xFF'):
+                return False
+                
+            # Check for proper JPEG structure
+            # Must have SOI (\xFF\xD8) at start and EOI (\xFF\xD9) at end
+            if not content.endswith(b'\xFF\xD9'):
+                return False
+                
+            # Check for JFIF or Exif marker
+            if not (b'JFIF' in content[:23] or b'Exif' in content[:23]):
+                return False
+                
+            # Minimum size for a valid JPEG (header + minimal image data)
+            if len(content) < 128:
+                return False
+                
+        elif extension == 'png':
+            # PNG validation
+            if not content.startswith(b'\x89PNG\r\n\x1a\n'):
+                return False
+                
+            # Must have IHDR chunk after signature
+            if b'IHDR' not in content[8:24]:
+                return False
+                
+            # Must have IEND chunk at end
+            if not content.endswith(b'IEND\xaeB`\x82'):
+                return False
+                
+            # Minimum size for a valid PNG
+            if len(content) < 57:  # Header + IHDR + IEND
+                return False
+                
+        elif extension == 'gif':
+            # GIF validation
+            if not content.startswith((b'GIF87a', b'GIF89a')):
+                return False
+                
+            # Check for proper structure (must have global color table and image descriptor)
+            if len(content) < 38:  # Minimum size for GIF header + color table
+                return False
+                
+            # Must end with semicolon
+            if not content.endswith(b'\x3B'):
+                return False
+                
+        elif extension == 'bmp':
+            # BMP validation
+            if not content.startswith(b'BM'):
+                return False
+                
+            # Check minimum size for BMP header
+            if len(content) < 54:  # Standard BMP header size
+                return False
+                
+            # Validate BMP header
+            try:
+                size = int.from_bytes(content[2:6], 'little')
+                if size != len(content):
+                    return False
+            except:
+                return False
+        
+        # Additional general image validation
+        try:
+            # Try to open and verify the image
+            img = Image.open(io.BytesIO(content))
+            img.verify()  # Verify image data
+            
+            # Check reasonable dimensions
+            if img.size[0] < 8 or img.size[1] < 8:  # Minimum 8x8 pixels
+                return False
+            if img.size[0] > 16384 or img.size[1] > 16384:  # Max 16384x16384 pixels
+                return False
+                
+            return True
+        except:
+            return False
+            
+    except Exception as e:
+        print(f"Error validating image: {str(e)}")
+        return False
 
 def extract_file_content(content, recursion_depth=0, max_recursion=1, content_hashes=None):
     """
