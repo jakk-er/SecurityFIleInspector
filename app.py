@@ -441,7 +441,7 @@ if st.session_state.active_menu == "File Scanner":
                     "Maximum recursion depth", 
                     min_value=0, 
                     max_value=2, 
-                    value=0,
+                    value=1,
                     help="Controls how deeply the tool will analyze nested files."
                 )
                 
