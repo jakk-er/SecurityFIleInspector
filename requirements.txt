@@ -3,3 +3,4 @@ trafilatura
 validators
 streamlit
 requests
+Pillow
