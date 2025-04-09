@@ -179,7 +179,8 @@ def analyze_file(content, filename, recursion_depth=0, max_recursion=1, content_
         "content": content,
         "size": len(content),
         "type": file_type,
-        "content_hash": original_hash
+        "content_hash": original_hash,
+        "extension": extension
     })
 
     # Special handling for HTML files - look for embedded Base64 images
@@ -588,7 +589,8 @@ def extract_file_content(content, recursion_depth=0, max_recursion=1, content_ha
                         "content": potential_file,
                         "size": len(potential_file),
                         "type": info['mime'],
-                        "source": "hex_signature"
+                        "source": "hex_signature",
+                        "extension": info['ext']
                     })
 
             except Exception:
@@ -757,7 +759,8 @@ def extract_file_content(content, recursion_depth=0, max_recursion=1, content_ha
                         "content": file_content[:max_size],
                         "size": max_size,
                         "type": file_type,
-                        "source": "embedded"
+                        "source": "embedded",
+                        "extension": extension
                     })
             except Exception as e:
                 print(f"Error processing potential embedded file: {str(e)}")
