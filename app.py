@@ -215,7 +215,8 @@ def categorize_files(files):
     for file in files:
         file_type = file.get('type', '').lower()
         file_name = file.get('name', '').lower()
-        extension = os.path.splitext(file_name)[1][1:] if '.' in file_name else ''
+        #extension = os.path.splitext(file_name)[1][1:] if '.' in file_name else ''
+        extension = file.get('extension', '').lower()
         
         # Check if file is a potentially malicious type
         is_malicious = False
@@ -855,6 +856,7 @@ if st.session_state.active_menu == "File Scanner":
                     "Name": selected_file['name'],
                     "Type": selected_file['type'],
                     "Size": f"{selected_file['size']} bytes",
+                    "Extension": selected_file.get('extension', 'N/A'),
                     "Encoding": selected_file.get('encoding', 'N/A')
                 })
             
