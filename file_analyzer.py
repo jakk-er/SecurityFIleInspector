@@ -745,8 +745,8 @@ def extract_file_content(content, recursion_depth=0, max_recursion=1, content_ha
 
                 # Only add validated files to the results
                 if valid_file:
-                    # Use a smaller size limit to avoid large false positives
-                    max_size = min(5 * 1024 * 1024, len(file_content))  # 5MB or file size, whichever is smaller
+                    # Increase size limit to 200MB
+                    max_size = min(200 * 1024 * 1024, len(file_content))  # 200MB or file size, whichever is smaller
 
                     # Check content hash before adding
                     file_hash = generate_file_hash(file_content[:max_size])['md5']
@@ -781,10 +781,37 @@ def find_hidden_markers(content):
     markers = []
 
     try:
+        # Also look for custom BASE64 marker
         if isinstance(content, bytes):
-            content_str = content.decode('utf-8', errors='ignore')
-        else:
-            content_str = str(content)
+            base64_marker = b'\x00BASE64\x00'
+            marker_pos = content.find(base64_marker)
+            if marker_pos != -1:
+                try:
+                    # Read 4 bytes after marker for length
+                    marker_start = marker_pos + len(base64_marker)
+                    length_bytes = content[marker_start:marker_start + 4]
+                    length = int.from_bytes(length_bytes, 'big')
+                    
+                    # Validate length is reasonable (up to 200MB)
+                    if 0 < length <= 200 * 1024 * 1024:
+                        # Extract the complete base64 content
+                        content_end = marker_start + 4 + length
+                        if content_end <= len(content):
+                            base64_content = content[marker_start + 4:content_end]
+                            if len(base64_content) == length:
+                                markers.append((marker_pos, "base64"))
+                                print(f"Found valid BASE64 marker with length {length}")
+                            else:
+                                print("Incomplete BASE64 content")
+                        else:
+                            print("BASE64 content extends beyond file end")
+                    else:
+                        print(f"Invalid BASE64 length: {length}")
+
+                except Exception as e:
+                    print(f"Error processing custom BASE64 marker: {str(e)}")
+
+        content_str = content.decode('utf-8', errors='ignore') if isinstance(content, bytes) else str(content)
 
         # 1. Detect Base64 encoded content with validation
         base64_pattern = r"(?:[A-Za-z0-9+/]{4,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?)"
@@ -796,11 +823,7 @@ def find_hidden_markers(content):
                     result = determine_file_type_extension(decoded)
                     file_type = result[0]
                     if file_type not in ['text/plain', 'application/octet-stream']:
-                        markers.append((
-                            match.start(),
-                            "base64",
-                            {"decoded_size": len(decoded), "type": file_type}
-                        ))
+                        markers.append((match.start(), "base64"))
             except (binascii.Error, ValueError):
                 continue
 
@@ -816,11 +839,7 @@ def find_hidden_markers(content):
                 if len(decoded) > 16:
                     result = determine_file_type_extension(decoded)
                     file_type = result[0]
-                    markers.append((
-                        match.start(),
-                        "hex",
-                        {"decoded_size": len(decoded), "type": file_type}
-                    ))
+                    markers.append((match.start(), "hex"))
             except ValueError:
                 continue
 
@@ -833,11 +852,7 @@ def find_hidden_markers(content):
         ]
         for pattern in suspicious_js_patterns:
             for match in re.finditer(pattern, content_str):
-                markers.append((
-                    match.start(),
-                    "suspicious_js",
-                    {"pattern": pattern, "match": match.group()[:20]}
-                ))
+                markers.append((match.start(), "suspicious_js"))
 
     except Exception as e:
         print(f"Error in hidden marker detection: {str(e)}")
@@ -930,7 +945,28 @@ def validate_extracted_content(data, min_size=128):
     Returns:
         bytes: Validated data or None
     """
-    if len(data) < min_size:
+    if not data or len(data) < min_size:
+        return None
+        
+    # More stringent validation for embedded content
+    try:
+        result = determine_file_type_extension(data)
+        file_type = result[0]
+        
+        # Skip generic binary data
+        if file_type == 'application/octet-stream':
+            return None
+            
+        # Validate PDFs more thoroughly
+        if file_type == 'application/pdf':
+            if not (data.startswith(b'%PDF-') and
+                   b'/Pages' in data[:4096] and
+                   b'endobj' in data and
+                   b'startxref' in data and
+                   b'%%EOF' in data[-1024:]):
+                return None
+    except Exception as e:
+        print(f"Error validating content: {str(e)}")
         return None
 
     result = determine_file_type_extension(data)
