@@ -270,7 +270,7 @@ def categorize_files(files):
 
 # Set page configuration
 st.set_page_config(
-    page_title="Security File Inspector",
+    page_title="File Encoding & Malware Detector",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="collapsed"  # Hide sidebar initially
@@ -372,7 +372,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-st.title("Security File Inspector")
+st.title("File Encoding & Malware Detector")
 
 # Main content
 if st.session_state.active_menu == "File Scanner":
@@ -442,6 +442,83 @@ if st.session_state.active_menu == "File Scanner":
                 help="Controls how deeply the tool will analyze nested files."
             )
             
+            # Add size and entropy configurations
+            with st.expander("Size and Entropy Thresholds"):
+                # Level 0 settings
+                st.subheader("Initial Scan (Level 0)")
+                min_size_0 = st.number_input(
+                    "Minimum file size (KB)", 
+                    min_value=1, 
+                    max_value=1024, 
+                    value=1,  # 1KB default
+                    key="min_size_0",
+                    help="Minimum file size for initial scan"
+                )
+                max_size_0 = st.number_input(
+                    "Maximum file size (MB)", 
+                    min_value=1, 
+                    max_value=200,  # Match Streamlit's upload limit
+                    value=200,  # 200MB default
+                    key="max_size_0",
+                    help="Maximum file size for initial scan"
+                )
+                entropy_0 = st.slider(
+                    "Entropy threshold", 
+                    min_value=0.0, 
+                    max_value=8.0, 
+                    value=7.5,  # Default
+                    key="entropy_0",
+                    help="Entropy threshold for initial scan"
+                )
+
+                # Level 1 settings
+                st.subheader("First Deep Scan (Level 1)")
+                min_size_1 = st.number_input(
+                    "Minimum file size (KB)", 
+                    min_value=1, 
+                    max_value=1024, 
+                    value=4,  # 4KB default
+                    key="min_size_1"
+                )
+                max_size_1 = st.number_input(
+                    "Maximum file size (MB)", 
+                    min_value=1, 
+                    max_value=100,
+                    value=100,  # 100MB default
+                    key="max_size_1"
+                )
+                entropy_1 = st.slider(
+                    "Entropy threshold", 
+                    min_value=0.0, 
+                    max_value=8.0, 
+                    value=7.0,  # Default
+                    key="entropy_1"
+                )
+
+                # Level 2 settings
+                st.subheader("Deepest Scan (Level 2)")
+                min_size_2 = st.number_input(
+                    "Minimum file size (KB)", 
+                    min_value=1, 
+                    max_value=1024, 
+                    value=8,  # 8KB default
+                    key="min_size_2"
+                )
+                max_size_2 = st.number_input(
+                    "Maximum file size (MB)", 
+                    min_value=1, 
+                    max_value=50,
+                    value=50,  # 50MB default
+                    key="max_size_2"
+                )
+                entropy_2 = st.slider(
+                    "Entropy threshold", 
+                    min_value=0.0, 
+                    max_value=8.0, 
+                    value=6.5,  # Default
+                    key="entropy_2"
+                )
+
             show_debug_info = st.checkbox(
                 "Show debug information", 
                 value=False,
@@ -951,7 +1028,7 @@ if st.session_state.active_menu == "File Scanner":
 elif st.session_state.active_menu == "About":
     st.header("About This Tool")
     st.markdown("""
-    ### Security File Inspector - File Encoding & Malware Detector
+    ### File Encoding & Malware Detector
     
     This tool helps security professionals and curious users analyze files for:
     
@@ -1023,4 +1100,4 @@ elif st.session_state.active_menu == "Help":
 
 # Footer
 st.markdown("---")
-st.markdown("Security File Inspector | Built with Streamlit")
+st.markdown("File Encoding & Malware Detector | Built with Streamlit")
